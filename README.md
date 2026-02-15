@@ -295,6 +295,10 @@ encrypt = true                  # API keys encrypted with local key file
 enabled = false                 # opt-in browser_open tool
 allowed_domains = ["docs.rs"]  # required when browser is enabled
 
+[weather]
+# Optional WeatherAPI.com key used by the weather_api tool (or set WEATHER_API_KEY env var)
+# api_key = "wx-..."
+
 [composio]
 enabled = false                 # opt-in: 1000+ OAuth apps via composio.dev
 

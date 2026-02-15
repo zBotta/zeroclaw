@@ -649,10 +649,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
             .await
         {
             Ok(response) => {
-                println!(
-                    "  🤖 Reply: {}",
-                    truncate_with_ellipsis(&response, 80)
-                );
+                println!("  🤖 Reply: {}", truncate_with_ellipsis(&response, 80));
                 // Find the channel that sent this message and reply
                 for ch in &channels {
                     if ch.name() == msg.channel {

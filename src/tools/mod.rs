@@ -8,6 +8,7 @@ pub mod memory_recall;
 pub mod memory_store;
 pub mod shell;
 pub mod traits;
+pub mod weather_api;
 
 pub use browser::BrowserTool;
 pub use browser_open::BrowserOpenTool;
@@ -21,6 +22,7 @@ pub use shell::ShellTool;
 pub use traits::Tool;
 #[allow(unused_imports)]
 pub use traits::{ToolResult, ToolSpec};
+pub use weather_api::WeatherApiTool;
 
 use crate::memory::Memory;
 use crate::security::SecurityPolicy;
@@ -49,6 +51,7 @@ pub fn all_tools(
         Box::new(MemoryStoreTool::new(memory.clone())),
         Box::new(MemoryRecallTool::new(memory.clone())),
         Box::new(MemoryForgetTool::new(memory)),
+        Box::new(WeatherApiTool::new()),
     ];
 
     if browser_config.enabled {

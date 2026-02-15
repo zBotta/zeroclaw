@@ -2,7 +2,7 @@ use crate::config::schema::{IrcConfig, WhatsAppConfig};
 use crate::config::{
     AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
     HeartbeatConfig, IMessageConfig, MatrixConfig, MemoryConfig, ObservabilityConfig,
-    RuntimeConfig, SecretsConfig, SlackConfig, TelegramConfig, WebhookConfig,
+    RuntimeConfig, SecretsConfig, SlackConfig, TelegramConfig, WeatherConfig, WebhookConfig,
 };
 use anyhow::{Context, Result};
 use console::style;
@@ -19,6 +19,7 @@ pub struct ProjectContext {
     pub timezone: String,
     pub agent_name: String,
     pub communication_style: String,
+    pub weather_api_key: Option<String>,
 }
 
 // ── Banner ───────────────────────────────────────────────────────
@@ -79,6 +80,11 @@ pub fn run_wizard() -> Result<Config> {
     print_step(8, 8, "Workspace Files");
     scaffold_workspace(&workspace_dir, &project_ctx)?;
 
+    let weather_api_key = project_ctx
+        .weather_api_key
+        .clone()
+        .or_else(current_weather_api_key_env);
+
     // ── Build config ──
     // Defaults: SQLite memory, supervised autonomy, workspace-scoped, native runtime
     let config = Config {
@@ -104,6 +110,9 @@ pub fn run_wizard() -> Result<Config> {
         composio: composio_config,
         secrets: secrets_config,
         browser: BrowserConfig::default(),
+        weather: WeatherConfig {
+            api_key: weather_api_key.clone(),
+        },
         identity: crate::config::IdentityConfig::default(),
     };
 
@@ -118,6 +127,19 @@ pub fn run_wizard() -> Result<Config> {
         style(&config.memory.backend).green(),
         if config.memory.auto_save { "on" } else { "off" }
     );
+    println!(
+        "  {} Weather API: {}",
+        style("✓").green().bold(),
+        if config.weather.api_key.is_some() {
+            style("configured (also exported as WEATHER_API_KEY)").green()
+        } else {
+            style("skipped — set WEATHER_API_KEY or edit config.toml later").yellow()
+        }
+    );
+
+    if let Some(ref key) = config.weather.api_key {
+        std::env::set_var("WEATHER_API_KEY", key);
+    }
 
     config.save()?;
 
@@ -275,6 +297,8 @@ pub fn run_quick_setup(
         chunk_max_tokens: 512,
     };
 
+    let weather_api_key = current_weather_api_key_env();
+
     let config = Config {
         workspace_dir: workspace_dir.clone(),
         config_path: config_path.clone(),
@@ -294,10 +318,17 @@ pub fn run_quick_setup(
         composio: ComposioConfig::default(),
         secrets: SecretsConfig::default(),
         browser: BrowserConfig::default(),
+        weather: WeatherConfig {
+            api_key: weather_api_key.clone(),
+        },
         identity: crate::config::IdentityConfig::default(),
     };
 
     config.save()?;
+
+    if let Some(ref key) = config.weather.api_key {
+        std::env::set_var("WEATHER_API_KEY", key);
+    }
 
     // Scaffold minimal workspace files
     let default_ctx = ProjectContext {
@@ -307,6 +338,7 @@ pub fn run_quick_setup(
         communication_style:
             "Be warm, natural, and clear. Use occasional relevant emojis (1-2 max) and avoid robotic phrasing."
                 .into(),
+        weather_api_key,
     };
     scaffold_workspace(&workspace_dir, &default_ctx)?;
 
@@ -347,6 +379,15 @@ pub fn run_quick_setup(
             "off"
         } else {
             "on"
+        }
+    );
+    println!(
+        "  {} Weather API: {}",
+        style("✓").green().bold(),
+        if config.weather.api_key.is_some() {
+            style("configured").green()
+        } else {
+            style("skipped (set WEATHER_API_KEY later)").yellow()
         }
     );
     println!(
@@ -419,6 +460,13 @@ fn print_step(current: u8, total: u8, title: &str) {
 
 fn print_bullet(text: &str) {
     println!("  {} {}", style("›").cyan(), text);
+}
+
+fn current_weather_api_key_env() -> Option<String> {
+    std::env::var("WEATHER_API_KEY")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 // ── Step 1: Workspace ────────────────────────────────────────────
@@ -1023,6 +1071,36 @@ fn setup_project_context() -> Result<ProjectContext> {
             .interact_text()?,
     };
 
+    println!();
+    print_bullet("Optional: add a WeatherAPI.com key so the weather_api tool can fetch forecasts.");
+    let mut weather_api_key = current_weather_api_key_env();
+    let capture_weather_key = Confirm::new()
+        .with_prompt("  Provide a WeatherAPI.com API key now?")
+        .default(weather_api_key.is_some())
+        .interact()?;
+
+    if capture_weather_key {
+        let prompt = if weather_api_key.is_some() {
+            "  WeatherAPI.com key (press Enter to keep current key)"
+        } else {
+            "  WeatherAPI.com key (get one at weatherapi.com)"
+        };
+        let entered: String = Input::new()
+            .with_prompt(prompt)
+            .allow_empty(true)
+            .interact_text()?;
+        let trimmed = entered.trim();
+        if trimmed.is_empty() {
+            if weather_api_key.is_none() {
+                weather_api_key = None;
+            }
+        } else {
+            weather_api_key = Some(trimmed.to_string());
+        }
+    } else {
+        weather_api_key = None;
+    }
+
     println!(
         "  {} Context: {} | {} | {} | {}",
         style("✓").green().bold(),
@@ -1031,12 +1109,22 @@ fn setup_project_context() -> Result<ProjectContext> {
         style(&agent_name).green(),
         style(&communication_style).green().dim()
     );
+    println!(
+        "  {} Weather: {}",
+        style("✓").green().bold(),
+        if weather_api_key.is_some() {
+            style("key captured (stored securely + WEATHER_API_KEY)").green()
+        } else {
+            style("skipped — add later via wizard or WEATHER_API_KEY env var").yellow()
+        }
+    );
 
     Ok(ProjectContext {
         user_name,
         timezone,
         agent_name,
         communication_style,
+        weather_api_key,
     })
 }
 
@@ -1732,9 +1820,8 @@ fn setup_channels() -> Result<ChannelsConfig> {
                     }
                 };
 
-                let nickname: String = Input::new()
-                    .with_prompt("  Bot nickname")
-                    .interact_text()?;
+                let nickname: String =
+                    Input::new().with_prompt("  Bot nickname").interact_text()?;
 
                 if nickname.trim().is_empty() {
                     println!("  {} Skipped — nickname required", style("→").dim());
@@ -1777,7 +1864,9 @@ fn setup_channels() -> Result<ChannelsConfig> {
                 };
 
                 if allowed_users.is_empty() {
-                    print_bullet("⚠️  Empty allowlist — only you can interact. Add nicknames above.");
+                    print_bullet(
+                        "⚠️  Empty allowlist — only you can interact. Add nicknames above.",
+                    );
                 }
 
                 println!();
@@ -2397,6 +2486,15 @@ fn print_summary(config: &Config) {
         config.memory.backend,
         if config.memory.auto_save { "on" } else { "off" }
     );
+    println!(
+        "    {} Weather API:   {}",
+        style("⛅").cyan(),
+        if config.weather.api_key.is_some() {
+            "configured"
+        } else {
+            "not set"
+        }
+    );
 
     // Channels summary
     let mut channels: Vec<&str> = vec!["CLI"];
@@ -2563,6 +2661,7 @@ mod tests {
         assert!(ctx.timezone.is_empty());
         assert!(ctx.agent_name.is_empty());
         assert!(ctx.communication_style.is_empty());
+        assert!(ctx.weather_api_key.is_none());
     }
 
     // ── scaffold_workspace: basic file creation ─────────────────
@@ -2917,6 +3016,7 @@ mod tests {
             agent_name: "ZeroClaw-v2".into(),
             timezone: "Europe/Madrid".into(),
             communication_style: "Be direct.".into(),
+            weather_api_key: None,
         };
         scaffold_workspace(tmp.path(), &ctx).unwrap();
 
@@ -2939,6 +3039,7 @@ mod tests {
             communication_style:
                 "Be friendly, human, and conversational. Show warmth and empathy while staying efficient. Use natural contractions."
                     .into(),
+            weather_api_key: None,
         };
         scaffold_workspace(tmp.path(), &ctx).unwrap();
 

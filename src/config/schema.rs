@@ -57,6 +57,9 @@ pub struct Config {
     pub browser: BrowserConfig,
 
     #[serde(default)]
+    pub weather: WeatherConfig,
+
+    #[serde(default)]
     pub identity: IdentityConfig,
 }
 
@@ -191,6 +194,15 @@ pub struct BrowserConfig {
     /// Browser session name (for agent-browser automation)
     #[serde(default)]
     pub session_name: Option<String>,
+}
+
+// ── Weather API ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WeatherConfig {
+    /// WeatherAPI.com key used by the `weather_api` tool
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 // ── Memory ───────────────────────────────────────────────────
@@ -678,6 +690,7 @@ impl Default for Config {
             composio: ComposioConfig::default(),
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
+            weather: WeatherConfig::default(),
             identity: IdentityConfig::default(),
         }
     }
@@ -705,12 +718,14 @@ impl Config {
             // Set computed paths that are skipped during serialization
             config.config_path = config_path.clone();
             config.workspace_dir = zeroclaw_dir.join("workspace");
+            config.sync_weather_env();
             Ok(config)
         } else {
             let mut config = Config::default();
             config.config_path = config_path.clone();
             config.workspace_dir = zeroclaw_dir.join("workspace");
             config.save()?;
+            config.sync_weather_env();
             Ok(config)
         }
     }
@@ -771,6 +786,31 @@ impl Config {
                     self.default_temperature = temp;
                 }
             }
+        }
+
+        if let Ok(weather_key) = std::env::var("WEATHER_API_KEY") {
+            let trimmed = weather_key.trim();
+            if !trimmed.is_empty() {
+                self.weather.api_key = Some(trimmed.to_string());
+            }
+        }
+    }
+
+    fn sync_weather_env(&self) {
+        if let Ok(existing) = std::env::var("WEATHER_API_KEY") {
+            if !existing.trim().is_empty() {
+                return;
+            }
+        }
+
+        if let Some(key) = self
+            .weather
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+        {
+            std::env::set_var("WEATHER_API_KEY", key);
         }
     }
 
@@ -900,6 +940,7 @@ mod tests {
             composio: ComposioConfig::default(),
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
+            weather: WeatherConfig::default(),
             identity: IdentityConfig::default(),
         };
 
@@ -970,6 +1011,7 @@ default_temperature = 0.7
             composio: ComposioConfig::default(),
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
+            weather: WeatherConfig::default(),
             identity: IdentityConfig::default(),
         };
 
@@ -1649,7 +1691,7 @@ default_temperature = 0.7
     fn env_override_temperature_out_of_range_ignored() {
         // Clean up any leftover env vars from other tests
         std::env::remove_var("ZEROCLAW_TEMPERATURE");
-        
+
         let mut config = Config::default();
         let original_temp = config.default_temperature;
 
@@ -1674,6 +1716,18 @@ default_temperature = 0.7
         assert_eq!(config.gateway.port, original_port);
 
         std::env::remove_var("PORT");
+    }
+
+    #[test]
+    fn env_override_weather_api_key() {
+        let mut config = Config::default();
+        assert!(config.weather.api_key.is_none());
+
+        std::env::set_var("WEATHER_API_KEY", "wx-test-key");
+        config.apply_env_overrides();
+        assert_eq!(config.weather.api_key.as_deref(), Some("wx-test-key"));
+
+        std::env::remove_var("WEATHER_API_KEY");
     }
 
     #[test]
